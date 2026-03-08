@@ -1,0 +1,137 @@
+flowchart TD
+    %% ==================== START ====================
+    Start([User opens app]) --> RegLogin[Registration / Login]
+
+    subgraph RegLogin [Registration & Login]
+        direction TB
+        R1[Enter phone & OTP] --> R2[Create user & main account]
+        R2 --> R3[Generate JWT]
+        R3 --> R4[User logged in]
+    end
+
+    R4 --> Dashboard[User Dashboard]
+
+    %% ==================== DASHBOARD ====================
+    Dashboard --> Choice{Choose action}
+
+    Choice -->|Create Piggy| CreatePiggy
+    Choice -->|Transfer to own Piggy| TransferToOwn
+    Choice -->|Break Piggy| BreakPiggy
+    Choice -->|P2P Transfer| P2PTransfer
+    Choice -->|Contribute to other's Piggy| ContributePiggy
+    Choice -->|View statements| ViewStats
+    Choice -->|Admin Login| AdminLogin
+
+    %% ==================== CREATE PIGGY ====================
+    subgraph CreatePiggy [Create Piggy Saving Account]
+        direction TB
+        CP1[Fill name, target amount, lock period] --> CP2{Validate input}
+        CP2 -->|Invalid| CP3[Show error]
+        CP2 -->|Valid| CP4[Create piggy account record]
+        CP4 --> CP5[Create associated saving account<br>in Accounts table with balance 0]
+        CP5 --> CP6[Return success]
+        CP6 --> Dashboard
+    end
+
+    %% ==================== TRANSFER TO OWN PIGGY ====================
+    subgraph TransferToOwn [Transfer from Main to Own Piggy]
+        direction TB
+        TO1[Select piggy, enter amount] --> TO2{Validate: piggy exists,<br>sufficient main balance?}
+        TO2 -->|No| TO3[Show error]
+        TO2 -->|Yes| TO4[Start DB transaction]
+        TO4 --> TO5[Lock main account row<br>SELECT ... FOR UPDATE]
+        TO5 --> TO6[Deduct amount from main]
+        TO6 --> TO7[Lock piggy account row]
+        TO7 --> TO8[Add amount to piggy]
+        TO8 --> TO9[Create transaction record<br>type='transfer', status='completed']
+        TO9 --> TO10[Create ledger entries:<br>Debit main, Credit piggy]
+        TO10 --> TO11[Commit transaction]
+        TO11 --> TO12[Send push notification]
+        TO12 --> TO13[Update UI]
+        TO13 --> Dashboard
+    end
+
+    %% ==================== BREAK PIGGY ====================
+    subgraph BreakPiggy [Break Piggy Saving Account]
+        direction TB
+        BP1[Select piggy, tap 'Break'] --> BP2{Check conditions:<br>lock period over? target reached?}
+        BP2 --> BP3[If early break, calculate penalty<br>e.g., 5% of balance]
+        BP3 --> BP4[Show warning with penalty amount]
+        BP4 --> BP5{User confirms?}
+        BP5 -->|No| BP6[Cancel]
+        BP5 -->|Yes| BP7[Start DB transaction]
+        BP7 --> BP8[Lock piggy account]
+        BP8 --> BP9[Deduct full amount from piggy<br>(set balance to 0)]
+        BP9 --> BP10[Lock main account]
+        BP10 --> BP11[Add (amount - penalty) to main]
+        BP11 --> BP12[If penalty >0, credit penalty account<br> (optional)]
+        BP12 --> BP13[Create transaction record<br>type='break', penalty included]
+        BP13 --> BP14[Create ledger entries:<br>Debit piggy (full amount),<br>Credit main (net),<br>Credit penalty account (if any)]
+        BP14 --> BP15[Mark piggy as 'broken' or 'closed']
+        BP15 --> BP16[Commit transaction]
+        BP16 --> BP17[Notify user]
+        BP17 --> Dashboard
+    end
+
+    %% ==================== P2P TRANSFER ====================
+    subgraph P2PTransfer [P2P Transfer to Another User's Main Account]
+        direction TB
+        PT1[Enter recipient phone, amount, confirm] --> PT2{Validate: recipient exists,<br>sender has sufficient funds}
+        PT2 -->|No| PT3[Show error]
+        PT2 -->|Yes| PT4[Start DB transaction]
+        PT4 --> PT5[Lock sender's main account]
+        PT5 --> PT6[Deduct amount from sender]
+        PT6 --> PT7[Lock recipient's main account]
+        PT7 --> PT8[Add amount to recipient]
+        PT8 --> PT9[Create transaction record<br>type='p2p', status='completed']
+        PT9 --> PT10[Create ledger entries:<br>Debit sender main, Credit recipient main]
+        PT10 --> PT11[Commit transaction]
+        PT11 --> PT12[Send notifications to both users]
+        PT12 --> PT13[Update UI]
+        PT13 --> Dashboard
+    end
+
+    %% ==================== CONTRIBUTE TO OTHER'S PIGGY ====================
+    subgraph ContributePiggy [Contribute to Another User's Piggy]
+        direction TB
+        CO1[Enter recipient phone, select their piggy goal,<br>enter amount, confirm] --> CO2{Validate: recipient exists,<br>piggy active & allows contributions,<br>sender has sufficient funds}
+        CO2 -->|No| CO3[Show error]
+        CO2 -->|Yes| CO4[Start DB transaction]
+        CO4 --> CO5[Lock sender's main account]
+        CO5 --> CO6[Deduct amount from sender]
+        CO6 --> CO7[Lock recipient's piggy account]
+        CO7 --> CO8[Add amount to piggy]
+        CO8 --> CO9[Create transaction record<br>type='contribution', status='completed']
+        CO9 --> CO10[Create ledger entries:<br>Debit sender main, Credit recipient piggy]
+        CO10 --> CO11[Commit transaction]
+        CO11 --> CO12[Send notifications to both users]
+        CO12 --> CO13[Update UI]
+        CO13 --> Dashboard
+    end
+
+    %% ==================== VIEW STATEMENTS ====================
+    subgraph ViewStats [View Account Statements]
+        direction TB
+        VS1[Select account (main or piggy)] --> VS2[Fetch transactions & ledger entries]
+        VS2 --> VS3[Display history with balances]
+        VS3 --> Dashboard
+    end
+
+    %% ==================== ADMIN LOGIN ====================
+    subgraph AdminLogin [Admin Dashboard]
+        direction TB
+        AD1[Admin enters credentials] --> AD2[Validate admin role]
+        AD2 --> AD3[Access admin panel]
+        AD3 --> AD4[View all users, transactions,<br>reverse transactions,<br>change system settings]
+        AD4 --> AD5[Logout]
+        AD5 --> Start
+    end
+
+    %% ==================== STYLING (optional) ====================
+    style Start fill:#f9f,stroke:#333,stroke-width:2px
+    style RegLogin fill:#bbf,stroke:#333,stroke-width:1px
+    style Dashboard fill:#dfd,stroke:#333,stroke-width:2px
+    style Choice fill:#ffd,stroke:#333,stroke-width:1px
+    style TransferToOwn, P2PTransfer, ContributePiggy fill:#e6f3ff,stroke:#333,stroke-width:1px
+    style BreakPiggy fill:#ffe6e6,stroke:#333,stroke-width:1px
+    style AdminLogin fill:#ccc,stroke:#333,stroke-width:1px
